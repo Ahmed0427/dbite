@@ -8,7 +8,6 @@ uint16_t BNode::getNumOfKeys() const {
 }
 
 void BNode::setHeader(uint8_t type, uint16_t numOfKeys) {
-  std::fill(data.begin(), data.end(), 0);
   data[0] = type;
   LittleEndian::write_u16(data, NODE_TYPE_SIZE, numOfKeys);
 }
@@ -54,6 +53,10 @@ std::vector<uint8_t> BNode::getKey(uint16_t index) const {
   auto keySize = LittleEndian::read_u16(data, pos);
   std::vector<uint8_t> res(keySize);
   for (uint16_t i = 0; i < keySize; i++) {
+    if (data.size() == pos + ENTRY_HEADER_SIZE + i) {
+      std::cout << keySize << ' ' << i << ' ' << data.size() << '\n';
+      continue;
+    }
     res[i] = data[pos + ENTRY_HEADER_SIZE + i];
   }
   return res;
@@ -108,7 +111,7 @@ void BNode::copyRange(const BNode &srcNode, uint16_t dstStartIndex,
   for (uint16_t i = 0; i < n; i++) {
     auto srcKey = srcNode.getKey(srcStartIndex + i);
     auto srcValue = srcNode.getValue(srcStartIndex + i);
-    uint64_t ptr = srcNode.getPtr(srcStartIndex + i);
+    uint32_t ptr = srcNode.getPtr(srcStartIndex + i);
 
     uint16_t pos = getKeyValuePos(dstStartIndex + i);
 
@@ -146,9 +149,42 @@ BNode BNode::leafUpdate(uint16_t index, const std::vector<uint8_t> &key,
 // split a bigger-than-allowed node into two.
 // the second/right node always fits on a page.
 std::pair<BNode, BNode> BNode::splitHalf() {
+
+  const uint16_t total = getNumOfKeys();
+
+  // Left = arbitrary size
+  // Right = MUST fit on a single page
   BNode left(2 * BTREE_PAGE_SIZE);
   BNode right(BTREE_PAGE_SIZE);
-  return {};
+
+  uint16_t splitIndex = 0;
+  for (uint16_t i = 1; i < total; i++) {
+
+    BNode tmp(2 * BTREE_PAGE_SIZE);
+    tmp.setHeader(getType(), total - i);
+
+    tmp.copyRange(*this, 0, i, total - i);
+
+    if (tmp.size() <= BTREE_PAGE_SIZE) {
+      splitIndex = i;
+      break;
+    }
+  }
+
+  // Must find a split point
+  assert(splitIndex > 0 && splitIndex < total);
+
+  const uint16_t leftN = splitIndex;
+  const uint16_t rightN = total - splitIndex;
+
+  left.setHeader(getType(), leftN);
+  left.copyRange(*this, 0, 0, leftN);
+
+  right.setHeader(getType(), rightN);
+  right.copyRange(*this, 0, splitIndex, rightN);
+
+  assert(right.size() <= BTREE_PAGE_SIZE);
+  return {left, right};
 }
 
 // Replace a single child node with 1-3 nodes after a split operation.
@@ -366,7 +402,7 @@ BTree::BTree(std::shared_ptr<Pager> p) : pager_(std::move(p)) {}
 //                                uint16_t index, const std::vector<uint8_t>
 //                                &key, const std::vector<uint8_t> &value) {
 //   // Step 1: Get the child node pointer at the calculated index
-//   uint64_t childPtr = oldNode.getPtr(index);
+//   uint32_t childPtr = oldNode.getPtr(index);
 //
 //   // Step 2: Load the child node from disk/cache
 //   BNode childNode = pager_->get(childPtr);
@@ -387,7 +423,7 @@ BTree::BTree(std::shared_ptr<Pager> p) : pager_(std::move(p)) {}
 //     newNode = oldNode;
 //
 //     // Create a new page for the updated child node
-//     uint64_t newChildPtr = pager_->createPage(nodes[0].data);
+//     uint32_t newChildPtr = pager_->createPage(nodes[0].data);
 //
 //     // Update the pointer at this index to point to the new child page
 //     newNode.setPtr(index, newChildPtr);
@@ -405,7 +441,7 @@ BTree::BTree(std::shared_ptr<Pager> p) : pager_(std::move(p)) {}
 //     // Create new pages for all the split children and update their pointers
 //     for (size_t i = 0; i < nodes.size(); i++) {
 //       // Create a new page for each child node
-//       uint64_t newChildPtr = pager_->createPage(nodes[i].data);
+//       uint32_t newChildPtr = pager_->createPage(nodes[i].data);
 //
 //       // Set the pointer in the parent to point to this child
 //       // Pointers are at positions: index, index+1, index+2, ...
@@ -467,7 +503,7 @@ BTree::BTree(std::shared_ptr<Pager> p) : pager_(std::move(p)) {}
 //   return newNode;
 // }
 
-// uint64_t BTree::insert(const std::vector<uint8_t> &key,
+// uint32_t BTree::insert(const std::vector<uint8_t> &key,
 //                        const std::vector<uint8_t> &val) {
 //   BNode rootNode = pager_->readPage(rootPage_);
 //   BNode newRoot = recursiveInsert(rootNode, key, val);
@@ -477,7 +513,7 @@ BTree::BTree(std::shared_ptr<Pager> p) : pager_(std::move(p)) {}
 //
 //   if (nodes.size() == 1) {
 //     // No split needed, replace the old root
-//     uint64_t newRootPage = pager_->createPage(nodes[0]);
+//     uint32_t newRootPage = pager_->createPage(nodes[0]);
 //     pager_->deletePage(rootPage_);
 //     return newRootPage;
 //   } else {
@@ -486,12 +522,12 @@ BTree::BTree(std::shared_ptr<Pager> p) : pager_(std::move(p)) {}
 //     newRootNode.setHeader(BNODE_INTERNAL, nodes.size());
 //
 //     for (size_t i = 0; i < nodes.size(); i++) {
-//       uint64_t childPage = pager_->createPage(nodes[i]);
+//       uint32_t childPage = pager_->createPage(nodes[i]);
 //       nodeAppendKeyValue(newRootNode, i, childPage, nodes[i].getKey(0),
 //                          std::vector<uint8_t>());
 //     }
 //
-//     uint64_t newRootPage = pager_->createPage(newRootNode.data);
+//     uint32_t newRootPage = pager_->createPage(newRootNode.data);
 //     pager_->deletePage(rootPage_);
 //     rootPage_ = newRootPage;
 //     return newRootPage;
