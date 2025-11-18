@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstdio>
 #include <iostream>
+#include <random>
 
 void test_header() {
   BNode node;
@@ -80,8 +81,8 @@ void test_key_value_boundaries() {
   node.setHeader(2, 1);
 
   // MAX_ENTRY_SIZE is defined in src/common.h if wondered
-  std::vector<uint8_t> max_key(MAX_ENTRY_SIZE, 'K');
-  std::vector<uint8_t> max_val(0, 'V');
+  std::vector<uint8_t> max_key(MAX_ENTRY_SIZE / 2, 'K');
+  std::vector<uint8_t> max_val((MAX_ENTRY_SIZE + 1) / 2, 'V');
 
   node.setPtrAndKeyValue(0, 0, max_key, max_val);
 
@@ -109,7 +110,7 @@ void test_node_size() {
   std::cout << "Node size calculation works, size = " << sz << "\n";
 }
 
-void test_leaf_insert_update() {
+void test_node_leaf_insert_update() {
   BNode node;
   node.setHeader(2, 3);
 
@@ -149,7 +150,63 @@ void test_leaf_insert_update() {
   assert(newNode.getKey(2) == key3);
   assert(newNode.getValue(2) == val3);
 
-  std::cout << "insert and update key/value works\n";
+  std::cout << "Node insert and update key/value works\n";
+}
+
+void test_node_split_half() {
+  BNode node(2 * BTREE_PAGE_SIZE);
+
+  std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>> entries;
+
+  entries.push_back({{'A'}, {'a'}});
+
+  std::vector<uint8_t> mkey(32, 'M');
+  std::vector<uint8_t> mval(64, 'm');
+  entries.push_back({mkey, mval});
+
+  std::vector<uint8_t> maxKey(MAX_ENTRY_SIZE / 2, 'K');
+  std::vector<uint8_t> maxVal((MAX_ENTRY_SIZE + 1) / 2, 'V');
+  entries.push_back({maxKey, maxVal});
+
+  entries.push_back({{'Z'}, {'z'}});
+
+  int n = entries.size();
+  node.setHeader(2, n);
+
+  for (int i = 0; i < n; i++) {
+    node.setPtrAndKeyValue(i, i, entries[i].first, entries[i].second);
+  }
+
+  assert(node.size() <= 2 * BTREE_PAGE_SIZE);
+
+  auto [left, right] = node.splitHalf();
+
+  assert(left.getNumOfKeys() + right.getNumOfKeys() == n);
+  assert(left.getType() == node.getType());
+  assert(right.getType() == node.getType());
+
+  assert(right.size() <= BTREE_PAGE_SIZE);
+  assert(left.size() <= 2 * BTREE_PAGE_SIZE);
+
+  std::vector<std::vector<uint8_t>> combinedKeys;
+  for (int i = 0; i < left.getNumOfKeys(); i++) {
+    combinedKeys.push_back(left.getKey(i));
+  }
+
+  for (int i = 0; i < right.getNumOfKeys(); i++)
+    combinedKeys.push_back(right.getKey(i));
+
+  int idx = 0;
+  for (int i = 0; i < left.getNumOfKeys(); i++, idx++) {
+    assert(left.getKey(i) == entries[idx].first);
+    assert(left.getValue(i) == entries[idx].second);
+  }
+  for (int i = 0; i < right.getNumOfKeys(); i++, idx++) {
+    assert(right.getKey(i) == entries[idx].first);
+    assert(right.getValue(i) == entries[idx].second);
+  }
+
+  std::cout << "Node split half test passed.\n";
 }
 
 void test_all() {
@@ -161,7 +218,8 @@ void test_all() {
   test_key_value_empty();
   test_key_value_boundaries();
   test_node_size();
-  test_leaf_insert_update();
+  test_node_leaf_insert_update();
+  test_node_split_half();
   std::cout << "All tests passed!\n";
 }
 
