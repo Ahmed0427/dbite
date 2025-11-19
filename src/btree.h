@@ -1,14 +1,14 @@
 #pragma once
 
-#include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <memory>
 #include <utility>
 #include <vector>
 
 #include "common.h"
-#include "endian.h"
+#include "endianness.h"
 #include "pager.h"
 
 // BNode represents a B-tree node stored as a contiguous byte array.
@@ -43,7 +43,8 @@ public:
 
   BNode() : data(BTREE_PAGE_SIZE, 0) {};
   explicit BNode(size_t size) : data(size, 0) {};
-  explicit BNode(std::vector<uint8_t> &bytes) : data{bytes} {};
+  explicit BNode(const std::vector<uint8_t> &bytes) : data{bytes} {};
+  explicit BNode(const std::vector<uint8_t> &&bytes) : data{bytes} {};
 
   uint16_t getType() const;
   uint16_t getNumOfKeys() const;
@@ -57,6 +58,8 @@ public:
 
   uint16_t getKeyValuePos(uint16_t index) const;
 
+  void prettyPrint() const;
+
   uint16_t size() const;
 
   std::vector<uint8_t> getKey(uint16_t index) const;
@@ -69,32 +72,40 @@ public:
   void copyRange(const BNode &srcNode, uint16_t dstStartIndex,
                  uint16_t srcStartIndex, uint16_t n);
 
-  uint16_t indexLookup(const std::vector<uint8_t> &key);
+  uint16_t indexLookup(const std::vector<uint8_t> &key) const;
 
   BNode leafInsert(uint16_t index, const std::vector<uint8_t> &key,
-                   const std::vector<uint8_t> &value);
+                   const std::vector<uint8_t> &value) const;
 
   BNode leafUpdate(uint16_t index, const std::vector<uint8_t> &key,
-                   const std::vector<uint8_t> &value);
+                   const std::vector<uint8_t> &value) const;
 
   std::pair<BNode, BNode> splitHalf();
+
+  std::vector<BNode> splitToFitPage();
+
+  BNode replaceLinks(uint16_t index, const std::vector<BNode> &nodes) const;
 };
 
 class BTree {
 public:
+  std::shared_ptr<Pager> pager_;
+  uint32_t rootPage_;
+
   explicit BTree(std::shared_ptr<Pager> p);
 
-  uint64_t insert(const std::vector<uint8_t> &key,
+  uint32_t insert(const std::vector<uint8_t> &key,
                   const std::vector<uint8_t> &val);
 
-private:
-  uint64_t rootPage_;
-  std::shared_ptr<Pager> pager_;
-
-  void internalNodeInsert(BNode &newNode, const BNode &oldNode, uint16_t index,
-                          const std::vector<uint8_t> &key,
-                          const std::vector<uint8_t> &value);
+  BNode internalNodeInsert(const BNode &oldNode, uint16_t index,
+                           const std::vector<uint8_t> &key,
+                           const std::vector<uint8_t> &value);
 
   BNode recursiveInsert(const BNode &node, const std::vector<uint8_t> &key,
                         const std::vector<uint8_t> &value);
+
+  std::vector<uint8_t> search(const std::vector<uint8_t> &key) const;
+
+  std::vector<uint8_t> searchRecursive(uint32_t pagePtr,
+                                       const std::vector<uint8_t> &key) const;
 };
