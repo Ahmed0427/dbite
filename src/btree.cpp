@@ -360,22 +360,23 @@ uint16_t BNode::indexLookup(const std::vector<uint8_t> &key) {
   };
 
   uint16_t nkeys = getNumOfKeys();
-  uint16_t found = 0;
+  if (nkeys == 0)
+    return 0;
 
-  uint16_t l = 0, r = nkeys - 1;
-  while (l <= r) {
+  uint16_t l = 0, r = nkeys;
+
+  while (l < r) {
     uint16_t mid = l + (r - l) / 2;
     int cmp = keyCompare(getKey(mid), key);
-    if (cmp <= 0) {
-      found = mid;
+
+    if (cmp < 0) {
       l = mid + 1;
     } else {
-      if (mid == 0)
-        break;
-      r = mid - 1;
+      r = mid;
     }
   }
-  return found;
+
+  return l;
 }
 
 //
