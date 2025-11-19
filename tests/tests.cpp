@@ -1,4 +1,5 @@
 #include "../src/btree.h"
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <iostream>
@@ -127,8 +128,8 @@ void test_node_leaf_insert_update() {
   node.setPtrAndKeyValue(1, 0, key3, val3);
 
   auto index = node.indexLookup(key2);
-  assert(index == 0);
-  auto newNode = node.leafInsert(index + 1, key2, val2);
+  assert(index == 1);
+  auto newNode = node.leafInsert(index, key2, val2);
 
   assert(newNode.getKey(0) == key1);
   assert(newNode.getValue(0) == val1);
@@ -155,6 +156,7 @@ void test_node_leaf_insert_update() {
 
 void test_node_split_half() {
   BNode node(2 * BTREE_PAGE_SIZE);
+  node.setHeader(2, 0);
 
   std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>> entries;
 
@@ -171,10 +173,10 @@ void test_node_split_half() {
   entries.push_back({{'Z'}, {'z'}});
 
   int n = entries.size();
-  node.setHeader(2, n);
 
   for (int i = 0; i < n; i++) {
-    node.setPtrAndKeyValue(i, i, entries[i].first, entries[i].second);
+    auto index = node.indexLookup(entries[i].first);
+    node = node.leafInsert(index, entries[i].first, entries[i].second);
   }
 
   assert(node.size() <= 2 * BTREE_PAGE_SIZE);
@@ -195,6 +197,22 @@ void test_node_split_half() {
 
   for (int i = 0; i < right.getNumOfKeys(); i++)
     combinedKeys.push_back(right.getKey(i));
+
+  for (int i = 1; i < (int)combinedKeys.size(); i++)
+    assert(combinedKeys[i - 1] <= combinedKeys[i]);
+
+  std::sort(entries.begin(), entries.end(), [](const auto &a, const auto &b) {
+    const auto &va = a.first;
+    const auto &vb = b.first;
+
+    size_t n = std::min(va.size(), vb.size());
+    int cmp = memcmp(va.data(), vb.data(), n);
+
+    if (cmp != 0)
+      return cmp < 0;
+
+    return va.size() < vb.size();
+  });
 
   int idx = 0;
   for (int i = 0; i < left.getNumOfKeys(); i++, idx++) {
