@@ -1,13 +1,11 @@
-#include "../src/btree.h"
 #include <algorithm>
 #include <cassert>
-#include <cstdio>
-#include <iostream>
-#include <random>
+
+#include "../src/btree.h"
 
 void test_header() {
   BNode node;
-  node.setHeader(2, 5);
+  node.setHeader(BNODE_LEAF, 5);
   assert(node.getType() == 2);
   assert(node.getNumOfKeys() == 5);
   std::cout << "Header set/get works\n";
@@ -15,7 +13,7 @@ void test_header() {
 
 void test_pointers() {
   BNode node;
-  node.setHeader(1, 3);
+  node.setHeader(BNODE_LEAF, 3);
   node.setPtr(0, 1111);
   node.setPtr(1, 2222);
   node.setPtr(2, 3333);
@@ -27,7 +25,7 @@ void test_pointers() {
 
 void test_offsets() {
   BNode node;
-  node.setHeader(1, 3);
+  node.setHeader(BNODE_LEAF, 3);
   node.setOffset(1, 10);
   node.setOffset(2, 20);
   node.setOffset(3, 30);
@@ -39,7 +37,7 @@ void test_offsets() {
 
 void test_key_value() {
   BNode node;
-  node.setHeader(2, 2);
+  node.setHeader(BNODE_LEAF, 2);
 
   std::vector<uint8_t> key1 = {'k', 'e', 'y', '1'};
   std::vector<uint8_t> val1 = {'v', 'a', 'l', '1'};
@@ -64,7 +62,7 @@ void test_key_value() {
 
 void test_key_value_empty() {
   BNode node;
-  node.setHeader(2, 1);
+  node.setHeader(BNODE_LEAF, 1);
 
   std::vector<uint8_t> empty_key = {};
   std::vector<uint8_t> empty_val = {};
@@ -79,7 +77,7 @@ void test_key_value_empty() {
 
 void test_key_value_boundaries() {
   BNode node;
-  node.setHeader(2, 1);
+  node.setHeader(BNODE_LEAF, 1);
 
   // MAX_ENTRY_SIZE is defined in src/common.h if wondered
   std::vector<uint8_t> max_key(MAX_ENTRY_SIZE / 2, 'K');
@@ -95,7 +93,7 @@ void test_key_value_boundaries() {
 
 void test_node_size() {
   BNode node;
-  node.setHeader(2, 2);
+  node.setHeader(BNODE_LEAF, 2);
 
   std::vector<uint8_t> key1 = {'a'};
   std::vector<uint8_t> val1 = {'b'};
@@ -113,7 +111,7 @@ void test_node_size() {
 
 void test_node_leaf_insert_update() {
   BNode node;
-  node.setHeader(2, 3);
+  node.setHeader(BNODE_LEAF, 3);
 
   std::vector<uint8_t> key1 = {'1'};
   std::vector<uint8_t> val1 = {'a'};
@@ -156,7 +154,7 @@ void test_node_leaf_insert_update() {
 
 void test_node_split_half() {
   BNode node(2 * BTREE_PAGE_SIZE);
-  node.setHeader(2, 0);
+  node.setHeader(BNODE_LEAF, 0);
 
   std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>> entries;
 
@@ -227,6 +225,99 @@ void test_node_split_half() {
   std::cout << "Node split half test passed.\n";
 }
 
+void validate_node_recursive(const BNode &node, Pager &pager, int depth = 0) {
+  for (int i = 1; i < node.getNumOfKeys(); i++) {
+    assert(node.getKey(i - 1) <= node.getKey(i));
+  }
+
+  if (node.getType() == BNODE_LEAF)
+    return;
+
+  for (int i = 0; i < node.getNumOfKeys(); i++) {
+    uint32_t childPtr = node.getPtr(i);
+    BNode child(pager.readPage(childPtr));
+    validate_node_recursive(child, pager, depth + 1);
+
+    // Separator key rules:
+    if (i > 0 && child.getNumOfKeys() > 0) {
+      auto firstKey = child.getKey(0);
+      auto sepKey = node.getKey(i - 1);
+      assert(sepKey <= firstKey);
+    }
+  }
+}
+
+void test_btree_insert() {
+  auto pager = std::make_shared<Pager>("tmp/btree_test.db", BTREE_PAGE_SIZE);
+  BTree tree(pager);
+
+  // ===========
+  // 1. Single insert
+  // ===========
+  {
+    uint32_t root = tree.insert({'A'}, {'a'});
+    BNode node(pager->readPage(root));
+
+    assert(node.getType() == BNODE_LEAF);
+    assert(node.getNumOfKeys() == 1);
+    assert(node.getKey(0)[0] == 'A');
+    assert(node.getValue(0)[0] == 'a');
+  }
+
+  // ===========
+  // 2. Insert sorted keys
+  // ===========
+  {
+    for (int i = 1; i <= 50; i++)
+      tree.insert({(uint8_t)i}, {(uint8_t)(i + 1)});
+
+    BNode root(pager->readPage(tree.rootPage_));
+    validate_node_recursive(root, *pager);
+
+    // Root should not shrink
+    assert(root.getNumOfKeys() > 0);
+  }
+
+  // ===========
+  // 3. Insert reverse keys — stress left splits
+  // ===========
+  {
+    for (int i = 200; i >= 100; i--)
+      tree.insert({(uint8_t)i}, {(uint8_t)(i + 1)});
+
+    BNode root(pager->readPage(tree.rootPage_));
+    validate_node_recursive(root, *pager);
+  }
+
+  // ===========
+  // 4. Random inserts
+  // ===========
+  {
+    for (int i = 0; i < 200; i++) {
+      uint8_t k = rand() % 255;
+      tree.insert({k}, {k});
+    }
+
+    BNode root(pager->readPage(tree.rootPage_));
+    validate_node_recursive(root, *pager);
+  }
+
+  // ===========
+  // 5. Very large number of inserts (page splitting pressure)
+  // ===========
+  {
+    for (int i = 0; i < 1000; i++) {
+      std::string key = "K" + std::to_string(i);
+      std::vector<uint8_t> keyVec(key.begin(), key.end());
+      tree.insert(keyVec, std::vector<uint8_t>(99, 'V'));
+    }
+    BNode root(pager->readPage(tree.rootPage_));
+    validate_node_recursive(root, *pager);
+    assert(root.getType() == BNODE_INTERNAL);
+  }
+  std::cout << "BTree insert tests passed.\n";
+}
+
 void test_all() {
   BNode node;
   test_header();
@@ -238,6 +329,7 @@ void test_all() {
   test_node_size();
   test_node_leaf_insert_update();
   test_node_split_half();
+  test_btree_insert();
   std::cout << "All tests passed!\n";
 }
 
