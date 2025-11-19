@@ -24,3 +24,17 @@ static constexpr size_t ENTRY_HEADER_SIZE =
 static constexpr size_t MAX_ENTRY_SIZE = BTREE_PAGE_SIZE - PAGE_HEADER_SIZE -
                                          PTR_SIZE - OFFSET_SIZE -
                                          ENTRY_HEADER_SIZE;
+
+inline int keyCompare(const std::vector<uint8_t> &a,
+                      const std::vector<uint8_t> &b) {
+  size_t n = std::min(a.size(), b.size());
+  int cmp = memcmp(a.data(), b.data(), n);
+  if (cmp != 0) {
+    return cmp;
+  } else if (a.size() < b.size()) {
+    return -1;
+  } else if (a.size() > b.size()) {
+    return 1;
+  }
+  return 0;
+}
