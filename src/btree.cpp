@@ -156,8 +156,8 @@ void BNode::copyRange(const BNode &srcNode, uint16_t dstStartIndex,
   if (n == 0)
     return;
 
-  assert(srcStartIndex + n <= srcNode.getNumOfKeys() &&
-         dstStartIndex + n <= getNumOfKeys());
+  assert(dstStartIndex + n <= getNumOfKeys());
+  assert(srcStartIndex + n <= srcNode.getNumOfKeys());
 
   for (uint16_t i = 0; i < n; i++) {
     auto srcKey = srcNode.getKey(srcStartIndex + i);
@@ -193,13 +193,7 @@ uint16_t BNode::indexLookup(const std::vector<uint8_t> &key) const {
     }
   }
 
-  // For internal nodes with n keys and n pointers:
-  // - If key < all keys, we want pointer 0
-  // - If key >= key[i], we want pointer i
-  // The binary search gives us the first key > our key,
-  // so we want the previous pointer (l-1), but clamped to [0, n-1]
-
-  if (getType() == BNODE_INTERNAL && l > 0) {
+  if (keyCompare(getKey(l), key) != 0 && getType() == BNODE_INTERNAL && l > 0) {
     return l - 1;
   }
 
