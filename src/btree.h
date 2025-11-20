@@ -85,7 +85,7 @@ public:
 
   std::vector<BNode> splitToFitPage();
 
-  BNode replaceLinks(uint16_t index, const std::vector<BNode> &nodes) const;
+  BNode updateLinks(uint16_t index, const std::vector<BNode> &nodes) const;
 
 private:
   std::vector<uint8_t> data_;

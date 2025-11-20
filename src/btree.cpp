@@ -298,8 +298,8 @@ std::vector<BNode> BNode::splitToFitPage() {
   return {leftLeftNode, middleNode, rightNode};
 }
 
-BNode BNode::replaceLinks(uint16_t index,
-                          const std::vector<BNode> &nodes) const {
+BNode BNode::updateLinks(uint16_t index,
+                         const std::vector<BNode> &nodes) const {
 
   BNode newNode(2 * BTREE_PAGE_SIZE);
   uint16_t newNumKeys = getNumOfKeys() + nodes.size() - 1;
@@ -334,7 +334,7 @@ BTree::BTree(std::shared_ptr<Pager> p) : pager_(std::move(p)) {
   rootPage_ = pager_->createPage(rootNode.data());
 }
 
-const int32_t BTree::rootPage() const { return rootPage_; }
+uint32_t BTree::rootPage() const { return rootPage_; }
 
 BNode BTree::internalNodeInsert(const BNode &oldNode, uint16_t index,
                                 const std::vector<uint8_t> &key,
@@ -353,7 +353,7 @@ BNode BTree::internalNodeInsert(const BNode &oldNode, uint16_t index,
     pager_->deletePage(childPtr);
     return newNode;
   } else {
-    auto newNode = oldNode.replaceLinks(index, nodes);
+    auto newNode = oldNode.updateLinks(index, nodes);
 
     for (size_t i = 0; i < nodes.size(); i++) {
       uint32_t newChildPtr = pager_->createPage(nodes[i].data());
