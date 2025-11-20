@@ -371,61 +371,75 @@ BNode BNode::leafDelete(uint16_t index) const {
   return newNode;
 }
 
+// BNode BNode::merge(const BNode &left, const BNode &right) {
+//   uint16_t leftN = left.getNumOfKeys();
+//   uint16_t rightN = right.getNumOfKeys();
+//
+//   BNode newNode(2 * BTREE_PAGE_SIZE);
+//   newNode.setHeader(left.getType(), leftN + rightN);
+//
+//   // 1) Copy left node
+//   newNode.copyRange(left, 0, 0, leftN);
+//   if (left.getType() == BNODE_INTERNAL) {
+//     for (uint16_t i = 0; i < leftN; i++)
+//       newNode.setPtr(i, left.getPtr(i));
+//   }
+//
+//   // 2) Shift for right node
+//   uint16_t shift = left.getOffset(leftN);
+//
+//   // 3) Copy right node
+//   for (uint16_t i = 0; i < rightN; i++) {
+//     uint16_t dstIndex = leftN + i;
+//
+//     // Pointer for internal nodes
+//     if (left.getType() == BNODE_INTERNAL)
+//       newNode.setPtr(dstIndex, right.getPtr(i));
+//
+//     // Skip offset 0 (implicit)
+//     if (dstIndex > 0) {
+//       uint16_t newOffset = right.getOffset(i) + shift;
+//       newNode.setOffset(dstIndex, newOffset);
+//     }
+//
+//     // Copy key/value
+//     auto key = right.getKey(i);
+//     auto value = right.getValue(i);
+//
+//     uint16_t pos = PAGE_HEADER_SIZE + PTR_SIZE * newNode.getNumOfKeys() +
+//                    OFFSET_SIZE * newNode.getNumOfKeys() +
+//                    (dstIndex == 0 ? 0 : right.getOffset(i) + shift);
+//
+//     if (pos + ENTRY_HEADER_SIZE + key.size() + value.size() >
+//         newNode.data_.size())
+//       newNode.data_.resize(pos + ENTRY_HEADER_SIZE + key.size() +
+//       value.size());
+//
+//     LittleEndian::write_u16(newNode.data_, pos,
+//                             static_cast<uint16_t>(key.size()));
+//     LittleEndian::write_u16(newNode.data_, pos + KEY_SIZE_FIELD_SIZE,
+//                             static_cast<uint16_t>(value.size()));
+//     memcpy(newNode.data_.data() + pos + ENTRY_HEADER_SIZE, key.data(),
+//            key.size());
+//     memcpy(newNode.data_.data() + pos + ENTRY_HEADER_SIZE + key.size(),
+//            value.data(), value.size());
+//   }
+//
+//   assert(newNode.size() < BTREE_PAGE_SIZE);
+//   newNode.data_.resize(BTREE_PAGE_SIZE);
+//   return newNode;
+// }
+
 BNode BNode::merge(const BNode &left, const BNode &right) {
   uint16_t leftN = left.getNumOfKeys();
   uint16_t rightN = right.getNumOfKeys();
 
-  BNode newNode(2 * BTREE_PAGE_SIZE);
+  BNode newNode(BTREE_PAGE_SIZE);
   newNode.setHeader(left.getType(), leftN + rightN);
 
-  // 1) Copy left node
   newNode.copyRange(left, 0, 0, leftN);
-  if (left.getType() == BNODE_INTERNAL) {
-    for (uint16_t i = 0; i < leftN; i++)
-      newNode.setPtr(i, left.getPtr(i));
-  }
+  newNode.copyRange(right, leftN, 0, rightN);
 
-  // 2) Shift for right node
-  uint16_t shift = left.getOffset(leftN);
-
-  // 3) Copy right node
-  for (uint16_t i = 0; i < rightN; i++) {
-    uint16_t dstIndex = leftN + i;
-
-    // Pointer for internal nodes
-    if (left.getType() == BNODE_INTERNAL)
-      newNode.setPtr(dstIndex, right.getPtr(i));
-
-    // Skip offset 0 (implicit)
-    if (dstIndex > 0) {
-      uint16_t newOffset = right.getOffset(i) + shift;
-      newNode.setOffset(dstIndex, newOffset);
-    }
-
-    // Copy key/value
-    auto key = right.getKey(i);
-    auto value = right.getValue(i);
-
-    uint16_t pos = PAGE_HEADER_SIZE + PTR_SIZE * newNode.getNumOfKeys() +
-                   OFFSET_SIZE * newNode.getNumOfKeys() +
-                   (dstIndex == 0 ? 0 : right.getOffset(i) + shift);
-
-    if (pos + ENTRY_HEADER_SIZE + key.size() + value.size() >
-        newNode.data_.size())
-      newNode.data_.resize(pos + ENTRY_HEADER_SIZE + key.size() + value.size());
-
-    LittleEndian::write_u16(newNode.data_, pos,
-                            static_cast<uint16_t>(key.size()));
-    LittleEndian::write_u16(newNode.data_, pos + KEY_SIZE_FIELD_SIZE,
-                            static_cast<uint16_t>(value.size()));
-    memcpy(newNode.data_.data() + pos + ENTRY_HEADER_SIZE, key.data(),
-           key.size());
-    memcpy(newNode.data_.data() + pos + ENTRY_HEADER_SIZE + key.size(),
-           value.data(), value.size());
-  }
-
-  assert(newNode.size() < BTREE_PAGE_SIZE);
-  newNode.data_.resize(BTREE_PAGE_SIZE);
   return newNode;
 }
 
