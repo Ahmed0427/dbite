@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <functional>
 #include <random>
 
 #include "../src/btree.h"
@@ -225,29 +226,31 @@ void test_node_split_half() {
   std::cout << "Node split half test passed.\n";
 }
 
-void validate_node_recursive(const BNode &node, Pager &pager, int depth = 0) {
-  for (int i = 1; i < node.getNumOfKeys(); i++) {
-    assert(node.getKey(i - 1) <= node.getKey(i));
-  }
-
-  if (node.getType() == BNODE_LEAF)
-    return;
-
-  for (int i = 0; i < node.getNumOfKeys(); i++) {
-    uint32_t childPtr = node.getPtr(i);
-    BNode child(pager.readPage(childPtr));
-    validate_node_recursive(child, pager, depth + 1);
-
-    // Separator key rules:
-    if (i > 0 && child.getNumOfKeys() > 0) {
-      auto firstKey = child.getKey(0);
-      auto sepKey = node.getKey(i - 1);
-      assert(sepKey <= firstKey);
-    }
-  }
-}
-
 void test_btree_insert() {
+
+  std::function<void(const BNode &, Pager &, int)> validate_node_recursive;
+  validate_node_recursive = [&](const BNode &node, Pager &pager, int depth) {
+    for (int i = 1; i < node.getNumOfKeys(); i++) {
+      assert(node.getKey(i - 1) <= node.getKey(i));
+    }
+
+    if (node.getType() == BNODE_LEAF)
+      return;
+
+    for (int i = 0; i < node.getNumOfKeys(); i++) {
+      uint32_t childPtr = node.getPtr(i);
+      BNode child(pager.readPage(childPtr));
+
+      validate_node_recursive(child, pager, depth + 1); // ✔️ now valid
+
+      if (i > 0 && child.getNumOfKeys() > 0) {
+        auto firstKey = child.getKey(0);
+        auto sepKey = node.getKey(i - 1);
+        assert(sepKey <= firstKey);
+      }
+    }
+  };
+
   std::mt19937 gen(std::random_device{}());
   int number = std::uniform_int_distribution<>(1000, 9999)(gen);
 
@@ -276,8 +279,8 @@ void test_btree_insert() {
     for (int i = 1; i <= 50; i++)
       tree.insert({(uint8_t)i}, {(uint8_t)(i + 1)});
 
-    BNode root(pager->readPage(tree.rootPage_));
-    validate_node_recursive(root, *pager);
+    BNode root(pager->readPage(tree.rootPage()));
+    validate_node_recursive(root, *pager, 0);
 
     // Root should not shrink
     assert(root.getNumOfKeys() > 0);
@@ -290,8 +293,8 @@ void test_btree_insert() {
     for (int i = 200; i >= 100; i--)
       tree.insert({(uint8_t)i}, {(uint8_t)(i + 1)});
 
-    BNode root(pager->readPage(tree.rootPage_));
-    validate_node_recursive(root, *pager);
+    BNode root(pager->readPage(tree.rootPage()));
+    validate_node_recursive(root, *pager, 0);
   }
 
   // ===========
@@ -303,8 +306,8 @@ void test_btree_insert() {
       tree.insert({k}, {k});
     }
 
-    BNode root(pager->readPage(tree.rootPage_));
-    validate_node_recursive(root, *pager);
+    BNode root(pager->readPage(tree.rootPage()));
+    validate_node_recursive(root, *pager, 0);
   }
 
   // ===========
@@ -316,8 +319,8 @@ void test_btree_insert() {
       std::vector<uint8_t> keyVec(key.begin(), key.end());
       tree.insert(keyVec, std::vector<uint8_t>(99, 'V'));
     }
-    BNode root(pager->readPage(tree.rootPage_));
-    validate_node_recursive(root, *pager);
+    BNode root(pager->readPage(tree.rootPage()));
+    validate_node_recursive(root, *pager, 0);
     assert(root.getType() == BNODE_INTERNAL);
   }
   std::cout << "BTree insert tests passed.\n";
@@ -340,11 +343,19 @@ void test_btree_search() {
   tree.insert({'B'}, valB);
   tree.insert({'C'}, valC);
 
-  assert(tree.search({'A'}) == valA);
-  assert(tree.search({'B'}) == valB);
-  assert(tree.search({'C'}) == valC);
-  assert(tree.search({'D'}).empty());
+  // --- FIXED OPTIONAL HANDLING ---
+  assert(tree.search({'A'}).has_value());
+  assert(tree.search({'A'}).value() == valA);
 
+  assert(tree.search({'B'}).has_value());
+  assert(tree.search({'B'}).value() == valB);
+
+  assert(tree.search({'C'}).has_value());
+  assert(tree.search({'C'}).value() == valC);
+
+  assert(!tree.search({'D'}).has_value());
+
+  // Large batch inserts
   const int N = 2000;
   for (int i = 0; i < N; i++) {
     std::vector<uint8_t> key(4);
@@ -357,6 +368,7 @@ void test_btree_search() {
     tree.insert(key, val);
   }
 
+  // Validate
   for (int i = 0; i < N; i++) {
     std::vector<uint8_t> key(4);
     key[0] = (i >> 24) & 0xFF;
@@ -367,25 +379,27 @@ void test_btree_search() {
     std::vector<uint8_t> expected = {static_cast<uint8_t>(i & 0xFF)};
     auto out = tree.search(key);
 
-    assert(!out.empty());
-    assert(out == expected);
+    assert(out.has_value());
+    assert(out.value() == expected);
   }
 
-  assert(tree.search({'A'}) == valA);
-  assert(tree.search({'B'}) == valB);
-  assert(tree.search({'C'}) == valC);
+  // Check original values still intact
+  assert(tree.search({'A'}).value() == valA);
+  assert(tree.search({'B'}).value() == valB);
+  assert(tree.search({'C'}).value() == valC);
 
+  // Duplicate key test
   std::vector<uint8_t> key_dup = {0, 0, 0, 10};
   std::vector<uint8_t> new_val = {'X'};
 
   tree.insert(key_dup, new_val);
-  assert(tree.search(key_dup) == new_val);
+  assert(tree.search(key_dup).value() == new_val);
 
   std::vector<uint8_t> new_val2 = {'Y'};
   tree.insert(key_dup, new_val2);
-  assert(tree.search(key_dup) == new_val2);
+  assert(tree.search(key_dup).value() == new_val2);
 
-  assert(tree.search({9, 9, 9, 9}).empty());
+  assert(!tree.search({9, 9, 9, 9}).has_value());
 
   std::cout << "BTree search test passed.\n";
 }

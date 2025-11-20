@@ -1,33 +1,43 @@
 #include "btree.h"
 
-uint16_t BNode::getType() const { return data.at(0); }
+BNode::BNode() : data_(BTREE_PAGE_SIZE, 0) {}
+
+BNode::BNode(size_t size) : data_(size, 0) {}
+
+BNode::BNode(const std::vector<uint8_t> &data) : data_(data) {}
+
+BNode::BNode(std::vector<uint8_t> &&data) : data_(std::move(data)) {}
+
+const std::vector<uint8_t> &BNode::data() const { return data_; }
+
+uint16_t BNode::getType() const { return data_.at(0); }
 
 uint16_t BNode::getNumOfKeys() const {
-  return LittleEndian::read_u16(data, NODE_TYPE_SIZE);
+  return LittleEndian::read_u16(data_, NODE_TYPE_SIZE);
 }
 
 void BNode::setHeader(uint8_t type, uint16_t numOfKeys) {
-  data[0] = type;
-  LittleEndian::write_u16(data, NODE_TYPE_SIZE, numOfKeys);
+  data_[0] = type;
+  LittleEndian::write_u16(data_, NODE_TYPE_SIZE, numOfKeys);
 }
 
 uint32_t BNode::getPtr(uint16_t index) const {
   assert(index < getNumOfKeys());
   auto pos = PAGE_HEADER_SIZE + (PTR_SIZE * index);
-  return LittleEndian::read_u32(data, pos);
+  return LittleEndian::read_u32(data_, pos);
 }
 
 void BNode::setPtr(uint16_t index, uint32_t value) {
   assert(index < getNumOfKeys());
   auto pos = PAGE_HEADER_SIZE + (PTR_SIZE * index);
-  LittleEndian::write_u32(data, pos, value);
+  LittleEndian::write_u32(data_, pos, value);
 }
 
 uint16_t BNode::getOffset(uint16_t index) const {
   auto nok = getNumOfKeys();
   assert(index <= getNumOfKeys());
   auto off = PAGE_HEADER_SIZE + PTR_SIZE * nok + OFFSET_SIZE * (index - 1);
-  return (index > 0) ? LittleEndian::read_u16(data, off) : 0;
+  return (index > 0) ? LittleEndian::read_u16(data_, off) : 0;
 }
 
 void BNode::setOffset(uint16_t index, uint16_t value) {
@@ -35,7 +45,7 @@ void BNode::setOffset(uint16_t index, uint16_t value) {
   auto nok = getNumOfKeys();
   assert(index <= getNumOfKeys());
   auto off = PAGE_HEADER_SIZE + PTR_SIZE * nok + OFFSET_SIZE * (index - 1);
-  LittleEndian::write_u16(data, off, value);
+  LittleEndian::write_u16(data_, off, value);
 }
 
 uint16_t BNode::getKeyValuePos(uint16_t index) const {
@@ -104,22 +114,22 @@ uint16_t BNode::size() const { return getKeyValuePos(getNumOfKeys()); }
 
 std::vector<uint8_t> BNode::getKey(uint16_t index) const {
   auto pos = getKeyValuePos(index);
-  auto keySize = LittleEndian::read_u16(data, pos);
+  auto keySize = LittleEndian::read_u16(data_, pos);
   std::vector<uint8_t> res(keySize);
   for (uint16_t i = 0; i < keySize; i++) {
-    assert(data.size() > pos + ENTRY_HEADER_SIZE + i);
-    res[i] = data[pos + ENTRY_HEADER_SIZE + i];
+    assert(data_.size() > pos + ENTRY_HEADER_SIZE + i);
+    res[i] = data_[pos + ENTRY_HEADER_SIZE + i];
   }
   return res;
 }
 
 std::vector<uint8_t> BNode::getValue(uint16_t index) const {
   auto pos = getKeyValuePos(index);
-  auto keySize = LittleEndian::read_u16(data, pos);
-  auto valueSize = LittleEndian::read_u16(data, pos + KEY_SIZE_FIELD_SIZE);
+  auto keySize = LittleEndian::read_u16(data_, pos);
+  auto valueSize = LittleEndian::read_u16(data_, pos + KEY_SIZE_FIELD_SIZE);
   std::vector<uint8_t> res(valueSize);
   for (uint16_t i = 0; i < valueSize; i++) {
-    res[i] = data[pos + ENTRY_HEADER_SIZE + keySize + i];
+    res[i] = data_[pos + ENTRY_HEADER_SIZE + keySize + i];
   }
   return res;
 }
@@ -133,14 +143,14 @@ void BNode::setPtrAndKeyValue(uint16_t index, uint32_t ptr,
 
   uint16_t pos = getKeyValuePos(index);
 
-  LittleEndian::write_u16(data, pos + 0, static_cast<uint16_t>(key.size()));
-  LittleEndian::write_u16(data, pos + 2, static_cast<uint16_t>(value.size()));
+  LittleEndian::write_u16(data_, pos + 0, static_cast<uint16_t>(key.size()));
+  LittleEndian::write_u16(data_, pos + 2, static_cast<uint16_t>(value.size()));
 
   size_t recordSize = ENTRY_HEADER_SIZE;
-  memcpy(data.data() + pos + recordSize, key.data(), key.size());
+  memcpy(data_.data() + pos + recordSize, key.data(), key.size());
 
   recordSize += key.size();
-  memcpy(data.data() + pos + recordSize, value.data(), value.size());
+  memcpy(data_.data() + pos + recordSize, value.data(), value.size());
 
   recordSize += value.size();
   uint32_t newOffset = static_cast<uint32_t>(getOffset(index)) + recordSize;
@@ -169,7 +179,7 @@ void BNode::copyRange(const BNode &srcNode, uint16_t dstStartIndex,
     size_t requiredSize =
         pos + ENTRY_HEADER_SIZE + srcKey.size() + srcValue.size();
 
-    assert(requiredSize <= data.size());
+    assert(requiredSize <= data_.size());
 
     setPtrAndKeyValue(dstStartIndex + i, ptr, srcKey, srcValue);
   }
@@ -266,21 +276,21 @@ std::pair<BNode, BNode> BNode::splitHalf() {
 std::vector<BNode> BNode::splitToFitPage() {
   if (size() <= BTREE_PAGE_SIZE) {
     BNode copy = *this;
-    copy.data.resize(BTREE_PAGE_SIZE);
+    copy.data_.resize(BTREE_PAGE_SIZE);
     return {copy};
   }
 
   auto [leftNode, rightNode] = splitHalf();
 
   if (leftNode.size() <= BTREE_PAGE_SIZE) {
-    leftNode.data.resize(BTREE_PAGE_SIZE);
-    rightNode.data.resize(BTREE_PAGE_SIZE);
+    leftNode.data_.resize(BTREE_PAGE_SIZE);
+    rightNode.data_.resize(BTREE_PAGE_SIZE);
     return {leftNode, rightNode};
   }
 
   auto [leftLeftNode, middleNode] = leftNode.splitHalf();
 
-  rightNode.data.resize(BTREE_PAGE_SIZE);
+  rightNode.data_.resize(BTREE_PAGE_SIZE);
 
   assert(leftLeftNode.size() <= BTREE_PAGE_SIZE);
   assert(middleNode.size() <= BTREE_PAGE_SIZE);
@@ -321,8 +331,10 @@ BNode BNode::replaceLinks(uint16_t index,
 BTree::BTree(std::shared_ptr<Pager> p) : pager_(std::move(p)) {
   BNode rootNode(BTREE_PAGE_SIZE);
   rootNode.setHeader(BNODE_LEAF, 0);
-  rootPage_ = pager_->createPage(rootNode.data);
+  rootPage_ = pager_->createPage(rootNode.data());
 }
+
+const int32_t BTree::rootPage() const { return rootPage_; }
 
 BNode BTree::internalNodeInsert(const BNode &oldNode, uint16_t index,
                                 const std::vector<uint8_t> &key,
@@ -335,8 +347,8 @@ BNode BTree::internalNodeInsert(const BNode &oldNode, uint16_t index,
   std::vector<BNode> nodes = updatedChild.splitToFitPage();
 
   if (nodes.size() == 1) {
-    BNode newNode(oldNode.data);
-    uint32_t newChildPtr = pager_->createPage(nodes[0].data);
+    BNode newNode(oldNode.data());
+    uint32_t newChildPtr = pager_->createPage(nodes[0].data());
     newNode.setPtr(index, newChildPtr);
     pager_->deletePage(childPtr);
     return newNode;
@@ -344,7 +356,7 @@ BNode BTree::internalNodeInsert(const BNode &oldNode, uint16_t index,
     auto newNode = oldNode.replaceLinks(index, nodes);
 
     for (size_t i = 0; i < nodes.size(); i++) {
-      uint32_t newChildPtr = pager_->createPage(nodes[i].data);
+      uint32_t newChildPtr = pager_->createPage(nodes[i].data());
       newNode.setPtr(index + i, newChildPtr);
     }
     pager_->deletePage(childPtr);
@@ -379,7 +391,7 @@ uint32_t BTree::insert(const std::vector<uint8_t> &key,
   std::vector<BNode> nodes = newRoot.splitToFitPage();
 
   if (nodes.size() == 1) {
-    uint32_t newRootPage = pager_->createPage(nodes[0].data);
+    uint32_t newRootPage = pager_->createPage(nodes[0].data());
     pager_->deletePage(rootPage_);
     rootPage_ = newRootPage;
   } else {
@@ -387,23 +399,24 @@ uint32_t BTree::insert(const std::vector<uint8_t> &key,
     newRootNode.setHeader(BNODE_INTERNAL, nodes.size());
 
     for (size_t i = 0; i < nodes.size(); i++) {
-      uint32_t childPage = pager_->createPage(nodes[i].data);
+      uint32_t childPage = pager_->createPage(nodes[i].data());
       newRootNode.setPtrAndKeyValue(i, childPage, nodes[i].getKey(0),
                                     std::vector<uint8_t>());
     }
 
-    uint32_t newRootPage = pager_->createPage(newRootNode.data);
+    uint32_t newRootPage = pager_->createPage(newRootNode.data());
     pager_->deletePage(rootPage_);
     rootPage_ = newRootPage;
   }
   return rootPage_;
 }
 
-std::vector<uint8_t> BTree::search(const std::vector<uint8_t> &key) const {
+std::optional<std::vector<uint8_t>>
+BTree::search(const std::vector<uint8_t> &key) const {
   return searchRecursive(rootPage_, key);
 }
 
-std::vector<uint8_t>
+std::optional<std::vector<uint8_t>>
 BTree::searchRecursive(uint32_t pagePtr,
                        const std::vector<uint8_t> &key) const {
   BNode node(pager_->readPage(pagePtr));
@@ -415,7 +428,7 @@ BTree::searchRecursive(uint32_t pagePtr,
         keyCompare(key, node.getKey(index)) == 0) {
       return node.getValue(index);
     }
-    return std::vector<uint8_t>();
+    return std::nullopt;
   }
 
   case BNODE_INTERNAL: {
@@ -425,6 +438,6 @@ BTree::searchRecursive(uint32_t pagePtr,
 
   default:
     assert(false && "Invalid node type");
-    return std::vector<uint8_t>();
+    return std::nullopt;
   }
 }

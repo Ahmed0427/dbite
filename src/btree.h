@@ -4,6 +4,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -39,12 +40,12 @@
 
 class BNode {
 public:
-  std::vector<uint8_t> data;
+  BNode();
+  explicit BNode(size_t size);
+  explicit BNode(const std::vector<uint8_t> &data);
+  explicit BNode(std::vector<uint8_t> &&data);
 
-  BNode() : data(BTREE_PAGE_SIZE, 0) {};
-  explicit BNode(size_t size) : data(size, 0) {};
-  explicit BNode(const std::vector<uint8_t> &bytes) : data{bytes} {};
-  explicit BNode(const std::vector<uint8_t> &&bytes) : data{bytes} {};
+  const std::vector<uint8_t> &data() const;
 
   uint16_t getType() const;
   uint16_t getNumOfKeys() const;
@@ -85,18 +86,24 @@ public:
   std::vector<BNode> splitToFitPage();
 
   BNode replaceLinks(uint16_t index, const std::vector<BNode> &nodes) const;
+
+private:
+  std::vector<uint8_t> data_;
 };
 
 class BTree {
 public:
-  std::shared_ptr<Pager> pager_;
-  uint32_t rootPage_;
-
   explicit BTree(std::shared_ptr<Pager> p);
+
+  uint32_t rootPage() const;
 
   uint32_t insert(const std::vector<uint8_t> &key,
                   const std::vector<uint8_t> &val);
 
+  std::optional<std::vector<uint8_t>>
+  search(const std::vector<uint8_t> &key) const;
+
+private:
   BNode internalNodeInsert(const BNode &oldNode, uint16_t index,
                            const std::vector<uint8_t> &key,
                            const std::vector<uint8_t> &value);
@@ -104,8 +111,9 @@ public:
   BNode recursiveInsert(const BNode &node, const std::vector<uint8_t> &key,
                         const std::vector<uint8_t> &value);
 
-  std::vector<uint8_t> search(const std::vector<uint8_t> &key) const;
+  std::optional<std::vector<uint8_t>>
+  searchRecursive(uint32_t pagePtr, const std::vector<uint8_t> &key) const;
 
-  std::vector<uint8_t> searchRecursive(uint32_t pagePtr,
-                                       const std::vector<uint8_t> &key) const;
+  std::shared_ptr<Pager> pager_;
+  uint32_t rootPage_;
 };
