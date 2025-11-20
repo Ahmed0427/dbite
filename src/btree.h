@@ -81,11 +81,19 @@ public:
   BNode leafUpdate(uint16_t index, const std::vector<uint8_t> &key,
                    const std::vector<uint8_t> &value) const;
 
-  std::pair<BNode, BNode> splitHalf();
+  std::pair<BNode, BNode> splitHalf() const;
 
-  std::vector<BNode> splitToFitPage();
+  std::vector<BNode> splitToFitPage() const;
 
   BNode updateLinks(uint16_t index, const std::vector<BNode> &nodes) const;
+
+  BNode leafDelete(uint16_t index) const;
+
+  static BNode merge(const BNode &left, const BNode &right);
+
+  BNode updateLink(uint16_t index, BNode &node) const;
+
+  BNode updateMergedLink(uint16_t index, BNode &node) const;
 
 private:
   std::vector<uint8_t> data_;
@@ -104,7 +112,7 @@ public:
   search(const std::vector<uint8_t> &key) const;
 
 private:
-  BNode internalNodeInsert(const BNode &oldNode, uint16_t index,
+  BNode internalNodeInsert(const BNode &parent, uint16_t index,
                            const std::vector<uint8_t> &key,
                            const std::vector<uint8_t> &value);
 
@@ -113,6 +121,16 @@ private:
 
   std::optional<std::vector<uint8_t>>
   searchRecursive(uint32_t pagePtr, const std::vector<uint8_t> &key) const;
+
+  std::pair<int, std::optional<BNode>>
+  selectSiblingForMerge(BNode parent, uint16_t childIndex, BNode child) const;
+
+  std::optional<BNode>
+  internalNodeDelete(const BNode &parent, uint16_t index,
+                     const std::vector<uint8_t> &key) const;
+
+  std::optional<BNode> recursiveDelete(const BNode &node,
+                                       const std::vector<uint8_t> &key) const;
 
   std::shared_ptr<Pager> pager_;
   uint32_t rootPage_;
