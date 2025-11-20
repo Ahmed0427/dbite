@@ -404,6 +404,78 @@ void test_btree_search() {
   std::cout << "BTree search test passed.\n";
 }
 
+void test_btree_remove() {
+  std::mt19937 gen(std::random_device{}());
+  int number = std::uniform_int_distribution<>(1000, 9999)(gen);
+
+  std::string file_name =
+      std::string("tmp/btree_test_") + std::to_string(number) + ".db";
+  auto pager = std::make_shared<Pager>(file_name, BTREE_PAGE_SIZE);
+  BTree tree(pager);
+
+  // 1) Simple inserts
+  std::vector<uint8_t> A = {'A'};
+  std::vector<uint8_t> B = {'B'};
+  std::vector<uint8_t> C = {'C'};
+  std::vector<uint8_t> val = {'x'};
+
+  tree.insert(A, val);
+  tree.insert(B, val);
+  tree.insert(C, val);
+
+  assert(tree.search(A).has_value());
+  assert(tree.search(B).has_value());
+  assert(tree.search(C).has_value());
+
+  // 2) Remove one key
+  assert(tree.remove(B));
+  assert(!tree.search(B).has_value());
+  assert(tree.search(A).has_value());
+  assert(tree.search(C).has_value());
+
+  // 3) Remove non-existing key
+  assert(!tree.remove({'Z'}));
+
+  // 4) Insert many keys to force splits
+  const int N = 2000;
+  for (int i = 0; i < N; i++) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
+                                static_cast<uint8_t>(i & 0xFF)};
+
+    std::vector<uint8_t> v = {static_cast<uint8_t>(i & 0xFF)};
+    tree.insert(key, v);
+  }
+
+  // Verify insertion
+  for (int i = 0; i < N; i++) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
+                                static_cast<uint8_t>(i & 0xFF)};
+    assert(tree.search(key).has_value());
+  }
+
+  // 5) Remove all keys
+  for (int i = 0; i < N; i++) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
+                                static_cast<uint8_t>(i & 0xFF)};
+    assert(tree.remove(key));
+    assert(!tree.search(key).has_value());
+  }
+
+  // 6) Tree should behave normally after being emptied
+  tree.insert({'X'}, {'y'});
+
+  {
+    auto res = tree.search({'X'});
+    assert(res.has_value());
+    assert(res.value() == std::vector<uint8_t>{'y'});
+  }
+
+  assert(tree.remove({'X'}));
+  assert(!tree.search({'X'}).has_value());
+
+  std::cout << "BTree remove test passed.\n";
+}
+
 void test_all() {
   BNode node;
   test_header();
@@ -417,6 +489,7 @@ void test_all() {
   test_node_split_half();
   test_btree_insert();
   test_btree_search();
+  test_btree_remove();
   std::cout << "All tests passed!\n";
 }
 

@@ -111,6 +111,8 @@ public:
   std::optional<std::vector<uint8_t>>
   search(const std::vector<uint8_t> &key) const;
 
+  bool remove(const std::vector<uint8_t> &key);
+
 private:
   BNode internalNodeInsert(const BNode &parent, uint16_t index,
                            const std::vector<uint8_t> &key,

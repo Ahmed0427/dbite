@@ -204,6 +204,13 @@ uint16_t BNode::indexLookup(const std::vector<uint8_t> &key) const {
     }
   }
 
+  if (l == nkeys) {
+    if (getType() == BNODE_INTERNAL && nkeys > 0) {
+      return nkeys - 1;
+    }
+    return l;
+  }
+
   if (keyCompare(getKey(l), key) != 0 && getType() == BNODE_INTERNAL && l > 0) {
     return l - 1;
   }
@@ -340,7 +347,6 @@ BNode BNode::updateLink(uint16_t index, BNode &node) const {
 }
 
 BNode BNode::updateMergedLink(uint16_t index, BNode &node) const {
-
   BNode newNode(BTREE_PAGE_SIZE);
   uint16_t newNumKeys = getNumOfKeys() - 1;
 
@@ -352,7 +358,7 @@ BNode BNode::updateMergedLink(uint16_t index, BNode &node) const {
 
   newNode.setPtrAndKeyValue(index, 0, separatorKey, std::vector<uint8_t>());
 
-  newNode.copyRange(*this, index + 1, index + 2, getNumOfKeys() - index - 1);
+  newNode.copyRange(*this, index + 1, index + 2, getNumOfKeys() - index - 2);
 
   return newNode;
 }
@@ -366,10 +372,60 @@ BNode BNode::leafDelete(uint16_t index) const {
 }
 
 BNode BNode::merge(const BNode &left, const BNode &right) {
-  BNode newNode(BTREE_PAGE_SIZE);
-  newNode.setHeader(left.getType(), left.getNumOfKeys() + right.getNumOfKeys());
-  newNode.copyRange(left, 0, 0, left.getNumOfKeys());
-  newNode.copyRange(right, left.getNumOfKeys(), 0, right.getNumOfKeys());
+  uint16_t leftN = left.getNumOfKeys();
+  uint16_t rightN = right.getNumOfKeys();
+
+  BNode newNode(2 * BTREE_PAGE_SIZE);
+  newNode.setHeader(left.getType(), leftN + rightN);
+
+  // 1) Copy left node
+  newNode.copyRange(left, 0, 0, leftN);
+  if (left.getType() == BNODE_INTERNAL) {
+    for (uint16_t i = 0; i < leftN; i++)
+      newNode.setPtr(i, left.getPtr(i));
+  }
+
+  // 2) Shift for right node
+  uint16_t shift = left.getOffset(leftN);
+
+  // 3) Copy right node
+  for (uint16_t i = 0; i < rightN; i++) {
+    uint16_t dstIndex = leftN + i;
+
+    // Pointer for internal nodes
+    if (left.getType() == BNODE_INTERNAL)
+      newNode.setPtr(dstIndex, right.getPtr(i));
+
+    // Skip offset 0 (implicit)
+    if (dstIndex > 0) {
+      uint16_t newOffset = right.getOffset(i) + shift;
+      newNode.setOffset(dstIndex, newOffset);
+    }
+
+    // Copy key/value
+    auto key = right.getKey(i);
+    auto value = right.getValue(i);
+
+    uint16_t pos = PAGE_HEADER_SIZE + PTR_SIZE * newNode.getNumOfKeys() +
+                   OFFSET_SIZE * newNode.getNumOfKeys() +
+                   (dstIndex == 0 ? 0 : right.getOffset(i) + shift);
+
+    if (pos + ENTRY_HEADER_SIZE + key.size() + value.size() >
+        newNode.data_.size())
+      newNode.data_.resize(pos + ENTRY_HEADER_SIZE + key.size() + value.size());
+
+    LittleEndian::write_u16(newNode.data_, pos,
+                            static_cast<uint16_t>(key.size()));
+    LittleEndian::write_u16(newNode.data_, pos + KEY_SIZE_FIELD_SIZE,
+                            static_cast<uint16_t>(value.size()));
+    memcpy(newNode.data_.data() + pos + ENTRY_HEADER_SIZE, key.data(),
+           key.size());
+    memcpy(newNode.data_.data() + pos + ENTRY_HEADER_SIZE + key.size(),
+           value.data(), value.size());
+  }
+
+  assert(newNode.size() < BTREE_PAGE_SIZE);
+  newNode.data_.resize(BTREE_PAGE_SIZE);
   return newNode;
 }
 
@@ -428,9 +484,12 @@ BNode BTree::recursiveInsert(const BNode &node, const std::vector<uint8_t> &key,
 }
 
 uint32_t BTree::insert(const std::vector<uint8_t> &key,
-                       const std::vector<uint8_t> &val) {
+                       const std::vector<uint8_t> &value) {
+  assert(key.size() != 0);
+  assert(key.size() + value.size() <= MAX_ENTRY_SIZE);
+
   BNode rootNode(pager_->readPage(rootPage_));
-  BNode newRoot = recursiveInsert(rootNode, key, val);
+  BNode newRoot = recursiveInsert(rootNode, key, value);
 
   std::vector<BNode> nodes = newRoot.splitToFitPage();
 
@@ -589,4 +648,28 @@ BTree::recursiveDelete(const BNode &node,
   default:
     assert(false && "bad node");
   }
+}
+
+bool BTree::remove(const std::vector<uint8_t> &key) {
+  assert(key.size() != 0);
+  assert(key.size() <= MAX_ENTRY_SIZE);
+
+  BNode rootNode(pager_->readPage(rootPage_));
+  auto newRootOpt = recursiveDelete(rootNode, key);
+
+  if (!newRootOpt.has_value()) {
+    return false;
+  }
+
+  auto newRoot = *newRootOpt;
+
+  if (newRoot.getNumOfKeys() == 1 && newRoot.getType() == BNODE_INTERNAL) {
+    pager_->deletePage(rootPage_);
+    rootPage_ = newRoot.getPtr(0);
+  } else {
+    uint32_t newRootPage = pager_->createPage(newRoot.data());
+    pager_->deletePage(rootPage_);
+    rootPage_ = newRootPage;
+  }
+  return true;
 }
