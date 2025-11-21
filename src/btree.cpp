@@ -601,14 +601,14 @@ BTree::internalNodeDelete(const BNode &parent, uint16_t index,
       selectSiblingForMerge(parent, index, updatedChild);
 
   if (mergeDirection == 0) {
-    // if (updatedChild.getNumOfKeys() == 0) {
-    //   assert(parent.getNumOfKeys() == 1 && index == 0);
-    //
-    //   BNode newNode(BTREE_PAGE_SIZE);
-    //   newNode.setHeader(BNODE_INTERNAL, 0);
-    //   pager_->deletePage(childPtr);
-    //   return newNode;
-    // }
+    if (updatedChild.getNumOfKeys() == 0) {
+      assert(parent.getNumOfKeys() == 1 && index == 0);
+
+      BNode newNode(BTREE_PAGE_SIZE);
+      newNode.setHeader(BNODE_INTERNAL, 0);
+      pager_->deletePage(childPtr);
+      return newNode;
+    }
 
     auto newChildPtr = pager_->createPage(updatedChild.data());
     auto newNode = parent.updateLink(index, updatedChild);
