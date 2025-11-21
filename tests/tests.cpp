@@ -108,7 +108,7 @@ void test_node_size() {
   uint16_t sz = node.size();
 
   assert(sz > 0);
-  std::cout << "Node size calculation works, size = " << sz << "\n";
+  std::cout << "Node size calculation works\n";
 }
 
 void test_node_leaf_insert_update() {
@@ -223,7 +223,7 @@ void test_node_split_half() {
     assert(right.getValue(i) == entries[idx].second);
   }
 
-  std::cout << "Node split half test passed.\n";
+  std::cout << "Node split half test passed\n";
 }
 
 void test_btree_insert() {
@@ -256,7 +256,7 @@ void test_btree_insert() {
 
   std::string file_name =
       std::string("tmp/btree_test_") + std::to_string(number) + ".db";
-  auto pager = std::make_shared<Pager>(file_name, BTREE_PAGE_SIZE);
+  auto pager = std::make_shared<Pager>();
   BTree tree(pager);
 
   // ===========
@@ -323,7 +323,7 @@ void test_btree_insert() {
     validate_node_recursive(root, *pager, 0);
     assert(root.getType() == BNODE_INTERNAL);
   }
-  std::cout << "BTree insert tests passed.\n";
+  std::cout << "BTree insert tests passed\n";
 }
 
 void test_btree_search() {
@@ -332,7 +332,7 @@ void test_btree_search() {
 
   std::string file_name =
       std::string("tmp/btree_test_") + std::to_string(number) + ".db";
-  auto pager = std::make_shared<Pager>(file_name, BTREE_PAGE_SIZE);
+  auto pager = std::make_shared<Pager>();
   BTree tree(pager);
 
   std::vector<uint8_t> valA = {'a'};
@@ -401,59 +401,49 @@ void test_btree_search() {
 
   assert(!tree.search({9, 9, 9, 9}).has_value());
 
-  std::cout << "BTree search test passed.\n";
+  std::cout << "BTree search test passed\n";
 }
 
 void test_btree_remove() {
   std::mt19937 gen(std::random_device{}());
   int number = std::uniform_int_distribution<>(1000, 9999)(gen);
-
   std::string file_name =
       std::string("tmp/btree_test_") + std::to_string(number) + ".db";
-  auto pager = std::make_shared<Pager>(file_name, BTREE_PAGE_SIZE);
+  auto pager = std::make_shared<Pager>();
   BTree tree(pager);
 
-  // 1) Simple inserts
   std::vector<uint8_t> A = {'A'};
   std::vector<uint8_t> B = {'B'};
   std::vector<uint8_t> C = {'C'};
   std::vector<uint8_t> val = {'x'};
-
   tree.insert(A, val);
   tree.insert(B, val);
   tree.insert(C, val);
-
   assert(tree.search(A).has_value());
   assert(tree.search(B).has_value());
   assert(tree.search(C).has_value());
 
-  // 2) Remove one key
   assert(tree.remove(B));
   assert(!tree.search(B).has_value());
   assert(tree.search(A).has_value());
   assert(tree.search(C).has_value());
 
-  // 3) Remove non-existing key
   assert(!tree.remove({'Z'}));
 
-  // 4) Insert many keys to force splits
   const int N = 2000;
   for (int i = 0; i < N; i++) {
     std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
                                 static_cast<uint8_t>(i & 0xFF)};
-
     std::vector<uint8_t> v = {static_cast<uint8_t>(i & 0xFF)};
     tree.insert(key, v);
   }
 
-  // Verify insertion
   for (int i = 0; i < N; i++) {
     std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
                                 static_cast<uint8_t>(i & 0xFF)};
     assert(tree.search(key).has_value());
   }
 
-  // 5) Remove all keys
   for (int i = 0; i < N; i++) {
     std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
                                 static_cast<uint8_t>(i & 0xFF)};
@@ -461,19 +451,157 @@ void test_btree_remove() {
     assert(!tree.search(key).has_value());
   }
 
-  // 6) Tree should behave normally after being emptied
   tree.insert({'X'}, {'y'});
-
   {
     auto res = tree.search({'X'});
     assert(res.has_value());
     assert(res.value() == std::vector<uint8_t>{'y'});
   }
-
   assert(tree.remove({'X'}));
   assert(!tree.search({'X'}).has_value());
 
-  std::cout << "BTree remove test passed.\n";
+  std::vector<std::vector<uint8_t>> keys_reverse;
+  for (int i = 0; i < 100; i++) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>(i)};
+    keys_reverse.push_back(key);
+    tree.insert(key, {'v'});
+  }
+  for (int i = 99; i >= 0; i--) {
+    assert(tree.remove(keys_reverse[i]));
+    assert(!tree.search(keys_reverse[i]).has_value());
+  }
+
+  for (int i = 0; i < 100; i++) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>(i)};
+    tree.insert(key, {'v'});
+  }
+
+  for (int i = 0; i < 100; i += 2) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>(i)};
+    assert(tree.remove(key));
+  }
+
+  for (int i = 1; i < 100; i += 2) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>(i)};
+    assert(tree.search(key).has_value());
+  }
+
+  for (int i = 1; i < 100; i += 2) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>(i)};
+    assert(tree.remove(key));
+  }
+
+  std::vector<int> indices;
+  for (int i = 0; i < 500; i++) {
+    indices.push_back(i);
+    std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
+                                static_cast<uint8_t>(i & 0xFF)};
+    tree.insert(key, {'v'});
+  }
+  std::shuffle(indices.begin(), indices.end(), gen);
+  for (int idx : indices) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>((idx >> 8) & 0xFF),
+                                static_cast<uint8_t>(idx & 0xFF)};
+    assert(tree.remove(key));
+    assert(!tree.search(key).has_value());
+  }
+
+  tree.insert({'D', 'U', 'P'}, {'v', 'a', 'l'});
+  assert(tree.remove({'D', 'U', 'P'}));
+  assert(!tree.remove({'D', 'U', 'P'}));
+
+  for (size_t key_len = 1; key_len <= 20; key_len++) {
+    std::vector<uint8_t> key(key_len, static_cast<uint8_t>(key_len));
+    std::vector<uint8_t> value = {'v'};
+    tree.insert(key, value);
+    assert(tree.search(key).has_value());
+    assert(tree.remove(key));
+    assert(!tree.search(key).has_value());
+  }
+
+  std::vector<uint8_t> small_key = {'K'};
+  std::vector<uint8_t> large_value(1000, 'V');
+  tree.insert(small_key, large_value);
+  {
+    auto res = tree.search(small_key);
+    assert(res.has_value());
+    assert(res.value() == large_value);
+  }
+  assert(tree.remove(small_key));
+  assert(!tree.search(small_key).has_value());
+
+  tree.insert({'S', 'I', 'N', 'G', 'L', 'E'}, {'1'});
+  assert(tree.remove({'S', 'I', 'N', 'G', 'L', 'E'}));
+  assert(!tree.search({'S', 'I', 'N', 'G', 'L', 'E'}).has_value());
+
+  std::vector<uint8_t> min_key = {0x00};
+  std::vector<uint8_t> max_key = {0xFF, 0xFF};
+  tree.insert(min_key, {'m', 'i', 'n'});
+  tree.insert(max_key, {'m', 'a', 'x'});
+  tree.insert({'M', 'I', 'D'}, {'m', 'i', 'd'});
+  assert(tree.remove(min_key));
+  assert(!tree.search(min_key).has_value());
+  assert(tree.search(max_key).has_value());
+  assert(tree.remove(max_key));
+  assert(tree.remove({'M', 'I', 'D'}));
+
+  for (int i = 0; i < 100; i++) {
+    std::vector<uint8_t> key1 = {static_cast<uint8_t>(i), 0x01};
+    std::vector<uint8_t> key2 = {static_cast<uint8_t>(i), 0x02};
+    tree.insert(key1, {'a'});
+    tree.insert(key2, {'b'});
+    assert(tree.remove(key1));
+    assert(tree.search(key2).has_value());
+  }
+
+  for (int batch = 0; batch < 50; batch++) {
+    std::vector<uint8_t> k1 = {static_cast<uint8_t>(batch), 0x01};
+    std::vector<uint8_t> k2 = {static_cast<uint8_t>(batch), 0x02};
+    std::vector<uint8_t> k3 = {static_cast<uint8_t>(batch), 0x03};
+    tree.insert(k1, {'a'});
+    tree.insert(k2, {'b'});
+    tree.insert(k3, {'c'});
+    assert(tree.remove(k2));
+    assert(tree.search(k1).has_value());
+    assert(tree.search(k3).has_value());
+    tree.remove(k1);
+    tree.remove(k3);
+  }
+
+  const int STRESS_N = 1000;
+  for (int i = 0; i < STRESS_N; i++) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
+                                static_cast<uint8_t>(i & 0xFF)};
+    tree.insert(key, {'s'});
+  }
+
+  for (int i = 0; i < STRESS_N; i++) {
+    if (i % 10 != 0) {
+      std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
+                                  static_cast<uint8_t>(i & 0xFF)};
+      assert(tree.remove(key));
+    }
+  }
+
+  for (int i = 0; i < STRESS_N; i++) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
+                                static_cast<uint8_t>(i & 0xFF)};
+    if (i % 10 == 0) {
+      assert(tree.search(key).has_value());
+      tree.remove(key);
+    }
+  }
+
+  tree.insert({'P', 'R', 'E'}, {'1'});
+  tree.insert({'P', 'R', 'E', 'F', 'I', 'X'}, {'2'});
+  tree.insert({'P', 'R'}, {'3'});
+  assert(tree.remove({'P', 'R', 'E'}));
+  assert(tree.search({'P', 'R'}).has_value());
+  assert(tree.search({'P', 'R', 'E', 'F', 'I', 'X'}).has_value());
+  tree.remove({'P', 'R'});
+  tree.remove({'P', 'R', 'E', 'F', 'I', 'X'});
+
+  std::cout << "BTree remove test passed\n";
 }
 
 void test_all() {
@@ -490,7 +618,7 @@ void test_all() {
   test_btree_insert();
   test_btree_search();
   test_btree_remove();
-  std::cout << "All tests passed!\n";
+  std::cout << "All tests passed\n";
 }
 
 int main() {
