@@ -1,7 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <vector>
 
 static constexpr uint8_t BNODE_INTERNAL = 1;
 static constexpr uint8_t BNODE_LEAF = 2;
