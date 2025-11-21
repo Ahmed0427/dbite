@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <cassert>
 #include <functional>
 #include <random>
 
@@ -466,6 +465,7 @@ void test_btree_remove() {
     keys_reverse.push_back(key);
     tree.insert(key, {'v'});
   }
+
   for (int i = 99; i >= 0; i--) {
     assert(tree.remove(keys_reverse[i]));
     assert(!tree.search(keys_reverse[i]).has_value());
@@ -600,6 +600,58 @@ void test_btree_remove() {
   assert(tree.search({'P', 'R', 'E', 'F', 'I', 'X'}).has_value());
   tree.remove({'P', 'R'});
   tree.remove({'P', 'R', 'E', 'F', 'I', 'X'});
+
+  std::vector<uint8_t> dup_key = {'D', 'U', 'P', 'L', 'I', 'C', 'A', 'T', 'E'};
+  tree.insert(dup_key, {'v', 'a', 'l', '1'});
+  {
+    auto res = tree.search(dup_key);
+    assert(res.has_value());
+    assert((res.value() == std::vector<uint8_t>{'v', 'a', 'l', '1'}));
+  }
+
+  tree.insert(dup_key, {'v', 'a', 'l', '2'});
+  {
+    auto res = tree.search(dup_key);
+    assert(res.has_value());
+    assert((res.value() == std::vector<uint8_t>{'v', 'a', 'l', '2'}));
+  }
+
+  tree.remove(dup_key);
+
+  std::vector<uint8_t> multi_dup = {'M', 'U', 'L', 'T', 'I'};
+  tree.insert(multi_dup, {'1'});
+  tree.insert(multi_dup, {'2'});
+  tree.insert(multi_dup, {'3'});
+  {
+    auto res = tree.search(multi_dup);
+    assert(res.has_value());
+    assert(res.value() == std::vector<uint8_t>{'3'});
+  }
+  assert(tree.remove(multi_dup));
+  assert(!tree.search(multi_dup).has_value());
+  assert(!tree.remove(multi_dup));
+
+  for (int i = 0; i < 100; i++) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>(i)};
+    tree.insert(key, {'A'});
+  }
+
+  for (int i = 0; i < 100; i++) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>(i)};
+    tree.insert(key, {'B'});
+  }
+
+  for (int i = 0; i < 100; i++) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>(i)};
+    auto res = tree.search(key);
+    assert(res.has_value());
+    assert(res.value() == std::vector<uint8_t>{'B'});
+  }
+
+  for (int i = 0; i < 100; i++) {
+    std::vector<uint8_t> key = {static_cast<uint8_t>(i)};
+    tree.remove(key);
+  }
 
   std::cout << "BTree remove test passed\n";
 }
