@@ -55,61 +55,6 @@ uint16_t BNode::getKeyValuePos(uint16_t index) const {
          getOffset(index);
 }
 
-void BNode::prettyPrint() const {
-  uint16_t type = getType();
-  uint16_t n = getNumOfKeys();
-
-  std::cout << "=== BNode ===\n";
-  std::cout << "Type       : "
-            << (type == 1   ? "Internal"
-                : type == 2 ? "Leaf"
-                            : "UNKNOWN")
-            << " (" << type << ")\n";
-
-  std::cout << "Num Keys   : " << n << "\n\n";
-
-  if (type == 1) {
-    std::cout << "Pointers:\n";
-    for (uint16_t i = 0; i < n; i++) {
-      std::cout << "  ptr[" << i << "] = " << getPtr(i) << "\n";
-    }
-    std::cout << "\n";
-  }
-
-  std::cout << "Offsets:\n";
-  std::cout << "  [0] = 0 (implicit)\n";
-  for (uint16_t i = 1; i <= n; i++) {
-    std::cout << "  [" << i << "] = " << getOffset(i) << "\n";
-  }
-  std::cout << "\n";
-
-  std::cout << "Key/Value Pairs:\n";
-  for (uint16_t i = 0; i < n; i++) {
-    auto key = getKey(i);
-    auto value = getValue(i);
-
-    uint16_t keySize = key.size();
-    uint16_t valueSize = value.size();
-
-    std::cout << "  KV[" << i << "]\n";
-    std::cout << "    key_size   = " << keySize << "\n";
-    std::cout << "    value_size = " << valueSize << "\n";
-
-    std::cout << "    key   = \"";
-    for (auto c : key)
-      std::cout << char(c);
-    std::cout << "\"\n";
-
-    std::cout << "    value = \"";
-    for (auto c : value)
-      std::cout << char(c);
-    std::cout << "\"\n\n";
-  }
-
-  std::cout << "Total node size (computed): " << size() << " bytes\n";
-  std::cout << "=== END ===\n";
-}
-
 uint16_t BNode::size() const { return getKeyValuePos(getNumOfKeys()); }
 
 std::vector<uint8_t> BNode::getKey(uint16_t index) const {
@@ -370,65 +315,6 @@ BNode BNode::leafDelete(uint16_t index) const {
   newNode.copyRange(*this, index, index + 1, getNumOfKeys() - index - 1);
   return newNode;
 }
-
-// BNode BNode::merge(const BNode &left, const BNode &right) {
-//   uint16_t leftN = left.getNumOfKeys();
-//   uint16_t rightN = right.getNumOfKeys();
-//
-//   BNode newNode(2 * BTREE_PAGE_SIZE);
-//   newNode.setHeader(left.getType(), leftN + rightN);
-//
-//   // 1) Copy left node
-//   newNode.copyRange(left, 0, 0, leftN);
-//   if (left.getType() == BNODE_INTERNAL) {
-//     for (uint16_t i = 0; i < leftN; i++)
-//       newNode.setPtr(i, left.getPtr(i));
-//   }
-//
-//   // 2) Shift for right node
-//   uint16_t shift = left.getOffset(leftN);
-//
-//   // 3) Copy right node
-//   for (uint16_t i = 0; i < rightN; i++) {
-//     uint16_t dstIndex = leftN + i;
-//
-//     // Pointer for internal nodes
-//     if (left.getType() == BNODE_INTERNAL)
-//       newNode.setPtr(dstIndex, right.getPtr(i));
-//
-//     // Skip offset 0 (implicit)
-//     if (dstIndex > 0) {
-//       uint16_t newOffset = right.getOffset(i) + shift;
-//       newNode.setOffset(dstIndex, newOffset);
-//     }
-//
-//     // Copy key/value
-//     auto key = right.getKey(i);
-//     auto value = right.getValue(i);
-//
-//     uint16_t pos = PAGE_HEADER_SIZE + PTR_SIZE * newNode.getNumOfKeys() +
-//                    OFFSET_SIZE * newNode.getNumOfKeys() +
-//                    (dstIndex == 0 ? 0 : right.getOffset(i) + shift);
-//
-//     if (pos + ENTRY_HEADER_SIZE + key.size() + value.size() >
-//         newNode.data_.size())
-//       newNode.data_.resize(pos + ENTRY_HEADER_SIZE + key.size() +
-//       value.size());
-//
-//     LittleEndian::write_u16(newNode.data_, pos,
-//                             static_cast<uint16_t>(key.size()));
-//     LittleEndian::write_u16(newNode.data_, pos + KEY_SIZE_FIELD_SIZE,
-//                             static_cast<uint16_t>(value.size()));
-//     memcpy(newNode.data_.data() + pos + ENTRY_HEADER_SIZE, key.data(),
-//            key.size());
-//     memcpy(newNode.data_.data() + pos + ENTRY_HEADER_SIZE + key.size(),
-//            value.data(), value.size());
-//   }
-//
-//   assert(newNode.size() < BTREE_PAGE_SIZE);
-//   newNode.data_.resize(BTREE_PAGE_SIZE);
-//   return newNode;
-// }
 
 BNode BNode::merge(const BNode &left, const BNode &right) {
   uint16_t leftN = left.getNumOfKeys();

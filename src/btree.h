@@ -59,8 +59,6 @@ public:
 
   uint16_t getKeyValuePos(uint16_t index) const;
 
-  void prettyPrint() const;
-
   uint16_t size() const;
 
   std::vector<uint8_t> getKey(uint16_t index) const;
