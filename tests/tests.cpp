@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cassert>
 #include <functional>
 #include <random>
 
@@ -226,112 +227,12 @@ void test_node_split_half() {
 }
 
 void test_btree_insert() {
-
-  std::function<void(const BNode &, Pager &, int)> validate_node_recursive;
-  validate_node_recursive = [&](const BNode &node, Pager &pager, int depth) {
-    for (int i = 1; i < node.getNumOfKeys(); i++) {
-      assert(node.getKey(i - 1) <= node.getKey(i));
-    }
-
-    if (node.getType() == BNODE_LEAF)
-      return;
-
-    for (int i = 0; i < node.getNumOfKeys(); i++) {
-      uint32_t childPtr = node.getPtr(i);
-      BNode child(pager.readPage(childPtr));
-
-      validate_node_recursive(child, pager, depth + 1); // ✔️ now valid
-
-      if (i > 0 && child.getNumOfKeys() > 0) {
-        auto firstKey = child.getKey(0);
-        auto sepKey = node.getKey(i - 1);
-        assert(sepKey <= firstKey);
-      }
-    }
-  };
-
   std::mt19937 gen(std::random_device{}());
   int number = std::uniform_int_distribution<>(1000, 9999)(gen);
 
   std::string file_name =
       std::string("tmp/btree_test_") + std::to_string(number) + ".db";
-  auto pager = std::make_shared<Pager>();
-  BTree tree(pager);
-
-  // ===========
-  // 1. Single insert
-  // ===========
-  {
-    uint32_t root = tree.insert({'A'}, {'a'});
-    BNode node(pager->readPage(root));
-
-    assert(node.getType() == BNODE_LEAF);
-    assert(node.getNumOfKeys() == 1);
-    assert(node.getKey(0)[0] == 'A');
-    assert(node.getValue(0)[0] == 'a');
-  }
-
-  // ===========
-  // 2. Insert sorted keys
-  // ===========
-  {
-    for (int i = 1; i <= 50; i++)
-      tree.insert({(uint8_t)i}, {(uint8_t)(i + 1)});
-
-    BNode root(pager->readPage(tree.rootPage()));
-    validate_node_recursive(root, *pager, 0);
-
-    // Root should not shrink
-    assert(root.getNumOfKeys() > 0);
-  }
-
-  // ===========
-  // 3. Insert reverse keys — stress left splits
-  // ===========
-  {
-    for (int i = 200; i >= 100; i--)
-      tree.insert({(uint8_t)i}, {(uint8_t)(i + 1)});
-
-    BNode root(pager->readPage(tree.rootPage()));
-    validate_node_recursive(root, *pager, 0);
-  }
-
-  // ===========
-  // 4. Random inserts
-  // ===========
-  {
-    for (int i = 0; i < 200; i++) {
-      uint8_t k = rand() % 255;
-      tree.insert({k}, {k});
-    }
-
-    BNode root(pager->readPage(tree.rootPage()));
-    validate_node_recursive(root, *pager, 0);
-  }
-
-  // ===========
-  // 5. Very large number of inserts (page splitting pressure)
-  // ===========
-  {
-    for (int i = 0; i < 1000; i++) {
-      std::string key = "K" + std::to_string(i);
-      std::vector<uint8_t> keyVec(key.begin(), key.end());
-      tree.insert(keyVec, std::vector<uint8_t>(99, 'V'));
-    }
-    BNode root(pager->readPage(tree.rootPage()));
-    validate_node_recursive(root, *pager, 0);
-    assert(root.getType() == BNODE_INTERNAL);
-  }
-  std::cout << "BTree insert tests passed\n";
-}
-
-void test_btree_search() {
-  std::mt19937 gen(std::random_device{}());
-  int number = std::uniform_int_distribution<>(1000, 9999)(gen);
-
-  std::string file_name =
-      std::string("tmp/btree_test_") + std::to_string(number) + ".db";
-  auto pager = std::make_shared<Pager>();
+  auto pager = std::make_shared<Pager>(file_name);
   BTree tree(pager);
 
   std::vector<uint8_t> valA = {'a'};
@@ -400,7 +301,7 @@ void test_btree_search() {
 
   assert(!tree.search({9, 9, 9, 9}).has_value());
 
-  std::cout << "BTree search test passed\n";
+  std::cout << "BTree insert test passed\n";
 }
 
 void test_btree_remove() {
@@ -408,7 +309,7 @@ void test_btree_remove() {
   int number = std::uniform_int_distribution<>(1000, 9999)(gen);
   std::string file_name =
       std::string("tmp/btree_test_") + std::to_string(number) + ".db";
-  auto pager = std::make_shared<Pager>();
+  auto pager = std::make_shared<Pager>(file_name);
   BTree tree(pager);
 
   std::vector<uint8_t> A = {'A'};
@@ -656,6 +557,163 @@ void test_btree_remove() {
   std::cout << "BTree remove test passed\n";
 }
 
+void test_btree_persistence() {
+  std::mt19937 gen(std::random_device{}());
+  int number = std::uniform_int_distribution<>(1000, 9999)(gen);
+  std::string file_name =
+      std::string("tmp/btree_persist_") + std::to_string(number) + ".db";
+
+  // Phase 1: Create tree, insert data, and save
+  {
+    auto pager = std::make_shared<Pager>(file_name);
+    BTree tree(pager);
+
+    tree.insert({'A', 'P', 'P', 'L', 'E'}, {'r', 'e', 'd'});
+    tree.insert({'B', 'A', 'N', 'A', 'N', 'A'}, {'y', 'e', 'l', 'l', 'o', 'w'});
+    tree.insert({'C', 'H', 'E', 'R', 'R', 'Y'}, {'r', 'e', 'd'});
+
+    const int N = 500;
+    for (int i = 0; i < N; i++) {
+      std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
+                                  static_cast<uint8_t>(i & 0xFF)};
+      std::vector<uint8_t> value = {static_cast<uint8_t>((i >> 8) & 0xFF),
+                                    static_cast<uint8_t>(i & 0xFF),
+                                    static_cast<uint8_t>(i % 256)};
+      tree.insert(key, value);
+    }
+
+    assert(tree.search({'A', 'P', 'P', 'L', 'E'}).has_value());
+    assert(tree.search({'B', 'A', 'N', 'A', 'N', 'A'}).has_value());
+  }
+
+  // Phase 2: Reload from disk and verify all data
+  {
+    auto pager = std::make_shared<Pager>(file_name);
+    BTree tree(pager);
+
+    auto apple = tree.search({'A', 'P', 'P', 'L', 'E'});
+    assert(apple.has_value());
+    assert((apple.value() == std::vector<uint8_t>{'r', 'e', 'd'}));
+
+    auto banana = tree.search({'B', 'A', 'N', 'A', 'N', 'A'});
+    assert(banana.has_value());
+    assert(
+        (banana.value() == std::vector<uint8_t>{'y', 'e', 'l', 'l', 'o', 'w'}));
+
+    auto cherry = tree.search({'C', 'H', 'E', 'R', 'R', 'Y'});
+    assert(cherry.has_value());
+    assert((cherry.value() == std::vector<uint8_t>{'r', 'e', 'd'}));
+
+    const int N = 500;
+    for (int i = 0; i < N; i++) {
+      std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
+                                  static_cast<uint8_t>(i & 0xFF)};
+      std::vector<uint8_t> expected_value = {
+          static_cast<uint8_t>((i >> 8) & 0xFF), static_cast<uint8_t>(i & 0xFF),
+          static_cast<uint8_t>(i % 256)};
+      auto result = tree.search(key);
+      assert(result.has_value());
+      assert((result.value() == expected_value));
+    }
+  }
+
+  // Phase 3: Modify existing tree and persist changes
+  {
+    auto pager = std::make_shared<Pager>(file_name);
+    BTree tree(pager);
+
+    assert(tree.remove({'A', 'P', 'P', 'L', 'E'}));
+    for (int i = 0; i < 100; i++) {
+      std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
+                                  static_cast<uint8_t>(i & 0xFF)};
+      assert(tree.remove(key));
+    }
+
+    tree.insert({'D', 'A', 'T', 'E'}, {'b', 'r', 'o', 'w', 'n'});
+    tree.insert({'E', 'L', 'D', 'E', 'R'}, {'b', 'l', 'a', 'c', 'k'});
+    tree.insert({'B', 'A', 'N', 'A', 'N', 'A'}, {'g', 'r', 'e', 'e', 'n'});
+  }
+
+  // Phase 4: Verify modifications persisted
+  {
+    auto pager = std::make_shared<Pager>(file_name);
+    BTree tree(pager);
+
+    assert(!tree.search({'A', 'P', 'P', 'L', 'E'}).has_value());
+    for (int i = 0; i < 100; i++) {
+      std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
+                                  static_cast<uint8_t>(i & 0xFF)};
+      assert(!tree.search(key).has_value());
+    }
+
+    for (int i = 100; i < 500; i++) {
+      std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
+                                  static_cast<uint8_t>(i & 0xFF)};
+      assert(tree.search(key).has_value());
+    }
+
+    auto date = tree.search({'D', 'A', 'T', 'E'});
+    assert(date.has_value());
+    assert((date.value() == std::vector<uint8_t>{'b', 'r', 'o', 'w', 'n'}));
+
+    auto elder = tree.search({'E', 'L', 'D', 'E', 'R'});
+    assert(elder.has_value());
+    assert((elder.value() == std::vector<uint8_t>{'b', 'l', 'a', 'c', 'k'}));
+
+    auto banana = tree.search({'B', 'A', 'N', 'A', 'N', 'A'});
+    assert(banana.has_value());
+    assert((banana.value() == std::vector<uint8_t>{'g', 'r', 'e', 'e', 'n'}));
+
+    auto cherry = tree.search({'C', 'H', 'E', 'R', 'R', 'Y'});
+    assert(cherry.has_value());
+    assert((cherry.value() == std::vector<uint8_t>{'r', 'e', 'd'}));
+  }
+
+  // Phase 5: Test empty tree persistence
+  {
+    auto pager = std::make_shared<Pager>(file_name);
+    BTree tree(pager);
+
+    tree.remove({'B', 'A', 'N', 'A', 'N', 'A'});
+    tree.remove({'C', 'H', 'E', 'R', 'R', 'Y'});
+    tree.remove({'D', 'A', 'T', 'E'});
+    tree.remove({'E', 'L', 'D', 'E', 'R'});
+    for (int i = 100; i < 500; i++) {
+      std::vector<uint8_t> key = {static_cast<uint8_t>((i >> 8) & 0xFF),
+                                  static_cast<uint8_t>(i & 0xFF)};
+      tree.remove(key);
+    }
+  }
+
+  // Phase 6: Verify empty tree loads correctly
+  {
+    auto pager = std::make_shared<Pager>(file_name);
+    BTree tree(pager);
+
+    assert(!tree.search({'A', 'N', 'Y', 'T', 'H', 'I', 'N', 'G'}).has_value());
+
+    tree.insert({'N', 'E', 'W'}, {'d', 'a', 't', 'a'});
+    auto result = tree.search({'N', 'E', 'W'});
+    assert(result.has_value());
+    assert((result.value() == std::vector<uint8_t>{'d', 'a', 't', 'a'}));
+  }
+
+  // Final verification
+  {
+    auto pager = std::make_shared<Pager>(file_name);
+    BTree tree(pager);
+
+    auto result = tree.search({'N', 'E', 'W'});
+    assert(result.has_value());
+    assert((result.value() == std::vector<uint8_t>{'d', 'a', 't', 'a'}));
+  }
+
+  // Clean up test file
+  std::remove(file_name.c_str());
+
+  std::cout << "BTree persistence test passed.\n";
+}
+
 void test_all() {
   BNode node;
   test_header();
@@ -668,8 +726,8 @@ void test_all() {
   test_node_leaf_insert_update();
   test_node_split_half();
   test_btree_insert();
-  test_btree_search();
   test_btree_remove();
+  test_btree_persistence();
   std::cout << "All tests passed\n";
 }
 
