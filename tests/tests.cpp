@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <filesystem>
 #include <functional>
 #include <random>
 
@@ -230,8 +231,10 @@ void test_btree_insert() {
   std::mt19937 gen(std::random_device{}());
   int number = std::uniform_int_distribution<>(1000, 9999)(gen);
 
-  std::string file_name =
-      std::string("tmp/btree_test_") + std::to_string(number) + ".db";
+  std::string dir = "tmp";
+  std::filesystem::create_directories(dir);
+  std::string file_name = dir + "/dbite" + std::to_string(number) + ".db";
+
   auto pager = std::make_shared<Pager>(file_name);
   BTree tree(pager);
 
@@ -307,8 +310,11 @@ void test_btree_insert() {
 void test_btree_remove() {
   std::mt19937 gen(std::random_device{}());
   int number = std::uniform_int_distribution<>(1000, 9999)(gen);
-  std::string file_name =
-      std::string("tmp/btree_test_") + std::to_string(number) + ".db";
+
+  std::string dir = "tmp";
+  std::filesystem::create_directories(dir);
+  std::string file_name = dir + "/dbite" + std::to_string(number) + ".db";
+
   auto pager = std::make_shared<Pager>(file_name);
   BTree tree(pager);
 
@@ -560,8 +566,10 @@ void test_btree_remove() {
 void test_btree_persistence() {
   std::mt19937 gen(std::random_device{}());
   int number = std::uniform_int_distribution<>(1000, 9999)(gen);
-  std::string file_name =
-      std::string("tmp/btree_persist_") + std::to_string(number) + ".db";
+
+  std::string dir = "tmp";
+  std::filesystem::create_directories(dir);
+  std::string file_name = dir + "/dbite" + std::to_string(number) + ".db";
 
   // Phase 1: Create tree, insert data, and save
   {
