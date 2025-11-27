@@ -26,7 +26,12 @@ static constexpr size_t ENTRY_HEADER_SIZE =
 
 static constexpr size_t MAX_ENTRY_SIZE = BTREE_PAGE_SIZE - PAGE_HEADER_SIZE -
                                          PTR_SIZE - OFFSET_SIZE -
-                                         ENTRY_HEADER_SIZE;
+                                         ENTRY_HEADER_SIZE - 10;
+
+static constexpr uint64_t META_MAGIC =
+    (uint64_t('D') << 56) | (uint64_t('B') << 48) | (uint64_t('I') << 40) |
+    (uint64_t('T') << 32) | (uint64_t('E') << 24) | (uint64_t('0') << 16) |
+    (uint64_t('0') << 8) | (uint64_t('1'));
 
 inline int keyCompare(const std::vector<uint8_t> &a,
                       const std::vector<uint8_t> &b) {
