@@ -20,7 +20,7 @@ make
 ./test
 ```
 
-You can play around with the test binaries and example databases located in `tests/tests.cpp`.
+You can play around with the tests located in `tests/tests.cpp`.
 
 ### Notes
 
