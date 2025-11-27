@@ -10,6 +10,33 @@ BNode::BNode(std::vector<uint8_t> &&data) : data_(std::move(data)) {}
 
 const std::vector<uint8_t> &BNode::data() const { return data_; }
 
+void BNode::hexDump() const {
+  const size_t bytesPerLine = 16;
+
+  for (size_t i = 0; i < data_.size(); i += bytesPerLine) {
+    printf("%08zX  ", i);
+
+    for (size_t j = 0; j < bytesPerLine; ++j) {
+      if (i + j < data_.size()) {
+        printf("%02X ", data_[i + j]);
+      } else {
+        printf("   ");
+      }
+    }
+
+    printf(" |");
+    for (size_t j = 0; j < bytesPerLine; ++j) {
+      if (i + j < data_.size()) {
+        char c = data_[i + j];
+        printf("%c", (c >= 32 && c <= 126) ? c : '.');
+      } else {
+        printf(" ");
+      }
+    }
+    printf("|\n");
+  }
+}
+
 uint16_t BNode::getType() const { return data_.at(0); }
 
 uint16_t BNode::getNumOfKeys() const {
@@ -338,10 +365,15 @@ BNode BNode::merge(const BNode &left, const BNode &right) {
 //
 
 BTree::BTree(std::shared_ptr<Pager> p) : pager_(std::move(p)) {
-  BNode rootNode(BTREE_PAGE_SIZE);
-  rootNode.setHeader(BNODE_LEAF, 0);
-  rootPage_ = pager_->createPage(rootNode.data());
+  rootPage_ = pager_->rootPage();
+  if (rootPage_ == 0) {
+    BNode rootNode(BTREE_PAGE_SIZE);
+    rootNode.setHeader(BNODE_LEAF, 0);
+    rootPage_ = pager_->createPage(rootNode.data());
+  }
 }
+
+BTree::~BTree() { pager_->commitTxn(); }
 
 uint32_t BTree::rootPage() const { return rootPage_; }
 
@@ -379,12 +411,14 @@ BNode BTree::recursiveInsert(const BNode &node, const std::vector<uint8_t> &key,
   case BNODE_INTERNAL:
     return internalNodeInsert(node, index, key, value);
   default:
+    node.hexDump();
     assert(false && "bad node");
   }
 }
 
 uint32_t BTree::insert(const std::vector<uint8_t> &key,
                        const std::vector<uint8_t> &value) {
+  pager_->beginTxn();
   assert(key.size() != 0);
   assert(key.size() + value.size() <= MAX_ENTRY_SIZE);
 
@@ -411,7 +445,39 @@ uint32_t BTree::insert(const std::vector<uint8_t> &key,
     pager_->deletePage(rootPage_);
     rootPage_ = newRootPage;
   }
+
+  pager_->setRootPage(rootPage_);
+  pager_->commitTxn();
   return rootPage_;
+}
+
+bool BTree::remove(const std::vector<uint8_t> &key) {
+  assert(key.size() != 0);
+  assert(key.size() <= MAX_ENTRY_SIZE);
+
+  pager_->beginTxn();
+
+  BNode rootNode(pager_->readPage(rootPage_));
+  auto newRootOpt = recursiveDelete(rootNode, key);
+
+  if (!newRootOpt.has_value()) {
+    return false;
+  }
+
+  auto newRoot = *newRootOpt;
+
+  if (newRoot.getNumOfKeys() == 1 && newRoot.getType() == BNODE_INTERNAL) {
+    pager_->deletePage(rootPage_);
+    rootPage_ = newRoot.getPtr(0);
+  } else {
+    uint32_t newRootPage = pager_->createPage(newRoot.data());
+    pager_->deletePage(rootPage_);
+    rootPage_ = newRootPage;
+  }
+
+  pager_->setRootPage(rootPage_);
+  pager_->commitTxn();
+  return true;
 }
 
 std::optional<std::vector<uint8_t>>
@@ -548,28 +614,4 @@ BTree::recursiveDelete(const BNode &node,
   default:
     assert(false && "bad node");
   }
-}
-
-bool BTree::remove(const std::vector<uint8_t> &key) {
-  assert(key.size() != 0);
-  assert(key.size() <= MAX_ENTRY_SIZE);
-
-  BNode rootNode(pager_->readPage(rootPage_));
-  auto newRootOpt = recursiveDelete(rootNode, key);
-
-  if (!newRootOpt.has_value()) {
-    return false;
-  }
-
-  auto newRoot = *newRootOpt;
-
-  if (newRoot.getNumOfKeys() == 1 && newRoot.getType() == BNODE_INTERNAL) {
-    pager_->deletePage(rootPage_);
-    rootPage_ = newRoot.getPtr(0);
-  } else {
-    uint32_t newRootPage = pager_->createPage(newRoot.data());
-    pager_->deletePage(rootPage_);
-    rootPage_ = newRootPage;
-  }
-  return true;
 }

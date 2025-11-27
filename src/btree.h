@@ -47,6 +47,8 @@ public:
 
   const std::vector<uint8_t> &data() const;
 
+  void hexDump() const;
+
   uint16_t getType() const;
   uint16_t getNumOfKeys() const;
   void setHeader(uint8_t type, uint16_t numOfKeys);
@@ -100,6 +102,7 @@ private:
 class BTree {
 public:
   explicit BTree(std::shared_ptr<Pager> p);
+  ~BTree();
 
   uint32_t rootPage() const;
 
